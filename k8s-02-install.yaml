@@ -1,0 +1,102 @@
+---
+- hosts: master
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: create kubeadm config file
+      template:
+        src: k8s/_base/files/kubeadm.conf.j2
+        dest: /tmp/kubeadm.yaml
+        owner: root
+        group: root
+        mode: 0644
+    - name: run Kubeadm init
+      command: kubeadm init --config /tmp/kubeadm.yaml
+      args:
+        creates: /etc/kubernetes/admin.conf
+    - name: create .kube directory for ubuntu
+      file:
+        state: directory
+        path: "{{ item }}"
+      with_items:
+        - /home/ubuntu/.kube
+    - name: copy kubeconfig into ubuntu user-specific location
+      command: cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+      args:
+        creates: /home/ubuntu/.kube/config
+    - name: set mode on kube config locally
+      file:
+        mode: 0644
+        path: "{{ item }}"
+        owner: ubuntu
+      with_items:
+        - /home/ubuntu/.kube/config
+- hosts: master
+  remote_user: ubuntu
+  tasks:
+    - name: save master api endpoint to vars directory
+      local_action:
+        module: lineinfile
+        line: "k8s_master_ip: {{ ansible_all_ipv4_addresses[0] }}"
+        path: vars/k8s_master.yaml
+        create: yes
+        regexp: "k8s_master_ip.*$"
+
+- hosts: other
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: run Kubeadm join
+      command: kubeadm join --discovery-token-unsafe-skip-ca-verification --token {{ k8s_config.initial_token }} {{ k8s_master_ip }}:{{ k8s_config.api_port }}
+      args:
+        creates: /etc/kubernetes/bootstrap-kubelet.conf
+      register: kubeadm_result
+    - debug:
+        var: kubeadm_result
+        verbosity: 2
+- hosts: master
+  remote_user: ubuntu
+  tasks:
+    - name: Make directories for deployment artifacts
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+      with_items:
+        - "{{ ansible_env.HOME }}/deploy"
+        - "{{ ansible_env.HOME }}/deploy/k8s-base"
+    - name: Copy core manifests
+      copy:
+        src: "k8s/_base/manifests/{{ item }}"
+        dest: "{{ ansible_env.HOME }}/deploy/k8s-base/{{ item }}"
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+        mode: 0644
+      with_items:
+        - "helm-tiller-auth.yaml"
+    - name: Install kubernetes manifests
+      shell: "kubectl apply -f {{ item }} --namespace kube-system"
+      with_items:
+        - "\"https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')\""
+        - "{{ ansible_env.HOME }}/deploy/k8s-base/helm-tiller-auth.yaml"
+    - name: Helm init / upgrade
+      shell: |
+        helm init --wait --service-account tiller --upgrade || exit 0

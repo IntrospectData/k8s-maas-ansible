@@ -1,0 +1,37 @@
+---
+- name: Local Setup and storage installation
+  hosts: 127.0.0.1
+  connection: local
+  vars:
+    kubeconfig_tmp_location: /tmp/kubeconfig.tmp
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: create kubeconfig dir for user
+      file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: 0755
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+    - name: Proactively remove temp file for kubeconfig
+      file:
+        path: "{{ kubeconfig_tmp_location }}"
+        state: absent
+    - name: Copy Kubeconfig to Local from Master
+      command: "scp ubuntu@{{ k8s_master_ip }}:~/.kube/config {{ kubeconfig_tmp_location }}"
+      args:
+        creates: /tmp/kubeconfig.tmp
+    - name: Merge Kube configs for local use - note env
+      shell: |
+        export KUBECONFIG=~/.kube/config:{{ kubeconfig_tmp_location }}
+        kubectl config view --flatten > ~/.kube/config
+        rm -rf {{ kubeconfig_tmp_location }}
+    - name: Proactively remove temp file for kubeconfig
+      file:
+        path: "{{ kubeconfig_tmp_location }}"
+        state: absent

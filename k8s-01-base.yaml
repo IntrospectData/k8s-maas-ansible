@@ -1,0 +1,141 @@
+---
+- hosts: all
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+  - name: Include all .yaml and .json files
+    include_vars:
+      dir: vars
+      extensions:
+        - yaml
+        - json
+  - name: Install required packages for Docker CE
+    apt:
+      name:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+      state: present
+    register: apt_reqs
+    until: apt_reqs is success
+    retries: 3
+    delay: 3
+  - name: Add apt keys for docker and google
+    apt_key:
+      url: "{{ item }}"
+      state: present
+    register: apt_key
+    until: apt_key is success
+    retries: 3
+    delay: 3
+    with_items:
+      - https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      - https://download.docker.com/linux/ubuntu/gpg
+  - name: Add APT repository for K8s and Docker
+    apt_repository:
+      repo: "{{ item }}"
+      state: present
+    register: apt_repo
+    until: apt_repo is success
+    retries: 3
+    delay: 3
+    with_items:
+      - "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+      - "deb http://apt.kubernetes.io/ kubernetes-{{ ansible_distribution_release }} main"
+  - name: Run the equivalent of "apt-get update" as a separate step
+    apt:
+      update_cache: yes
+    register: apt_res
+    until: apt_res is success
+    retries: 3
+    delay: 3
+  - name: install apt packages
+    apt:
+      name:
+        - bridge-utils
+        - docker-ce
+        - kubeadm
+        - kubectl
+        - nfs-common
+        - kubelet
+      state: present
+  - name: create kubeconfig dir for user
+    file:
+      path: /home/ubuntu/.kube
+      state: directory
+      mode: 0755
+      owner: ubuntu
+      group: ubuntu
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0
+  - name: Remove swap from fstab so reboots work properly
+    lineinfile:
+      state: absent
+      path: /etc/fstab
+      firstmatch: yes
+      regexp: '^.*swap.*$'
+  - name: Create config directories
+    file:
+      path: "{{ item }}"
+      owner: root
+      group: root
+      state: directory
+      mode: 0755
+    with_items:
+      - /etc/kubernetes
+      - /etc/docker
+  - name: Copy static configuration files into place
+    copy:
+      src: "k8s/_base/files/{{ item.key }}"
+      dest: "{{ item.value }}"
+      owner: root
+      group: root
+      mode: 0644
+    with_dict:
+      "daemon.json": "/etc/docker/daemon.json"
+      "20-dns.conf": "/etc/systemd/system/kubelet.service.d/20-dns.conf"
+  - name: set bridge config in sysctl
+    sysctl:
+      name: net.bridge.bridge-nf-call-iptables
+      value: 1
+      state: present
+      reload: yes
+      sysctl_set: yes
+  - name: create kubernetes resolv.conf file
+    lineinfile:
+      path: /etc/kubernetes/resolv.conf
+      create: yes
+      line: 'nameserver {{ k8s_config.dns_server_ip }}'
+  - name: reload sysctl
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: kubelet
+- hosts: master
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: set authorized keys for ubuntu user
+      lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        line: "{{ item }}"
+      with_items: "{{ host_config.ssh_keys }}"
+    - name: install helm on master
+      unarchive:
+        extra_opts: ['--strip-components=1', '--show-stored-names']
+        remote_src: yes
+        src: "{{ helm_install_url }}"
+        dest: /usr/local/bin/
+        creates: /usr/local/bin/helm

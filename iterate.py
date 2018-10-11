@@ -35,14 +35,14 @@ def timed_cmd(cmd):
     return ret_val
 
 COMMAND_LIST = ['bash _clean.sh',
-                'python maas --kill',
                 'python maas --reset',
-                'ansible-playbook k8s-base.yaml',
-                'ansible-playbook k8s-common.yaml',
-                'ansible-playbook k8s-kube-system.yaml']
+                'ansible-playbook k8s-01-base.yaml',
+                'ansible-playbook k8s-02-install.yaml',
+                'ansible-playbook k8s-03-common.yaml',
+                'ansible-playbook k8s-04-localhost.yaml']
 
 @click.command()
-@click.argument('stage', envvar='STAGE', type=click.IntRange(min=0, max=4), default=1)
+@click.argument('stage', envvar='STAGE', type=click.IntRange(min=0, max=len(COMMAND_LIST)), default=len(COMMAND_LIST))
 @click.option('--maas-url', envvar='MAAS_API_URL', default='http://172.16.16.2:5240/MAAS', required=True)
 @click.option('--maas-key', envvar='MAAS_API_KEY', required=True)
 @click.option('--debug', default=False)
@@ -62,7 +62,7 @@ def cli(stage, maas_url, maas_key, debug, output_log):
     log.info('Starting to run proces for stage {} with commands: '.format(str(stage), COMMAND_LIST[:stage + 1]))
     last_status_code = 0
     for cmd in COMMAND_LIST[:stage + 1]:
-         if last_status_code = 0:
+         if last_status_code == 0:
             results[cmd] = timed_cmd('{}'.format(cmd))
             last_status_code = results[cmd].get('return_code', 0)
     elapsed = (datetime.utcnow() - dt).total_seconds()

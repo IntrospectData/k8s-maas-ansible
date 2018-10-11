@@ -4,11 +4,24 @@ We see this project both as a proof of concept, but also as a lab and a great wa
 
 ![Command Process](docs/k8s-maas-ansible.gif)
 
-## Why bother?
+### TL;DR; - getting things running
+
+* [ ] - Set up MaaS and hardware
+* [ ] - Install `python3`, `virtualenv` and `virtualenvwrapper`
+* [ ] - Install requirements for this project in a `virtualenv`
+* [ ] - Set environment variables for MAAS:
+    * `MAAS_API_URL`
+    * `MAAS_API_KEY`
+* To run iteratively and measure results:
+    * use the `./iterate.py` python script
+* To run process from end to end without timing/etc:
+    * use the `./_run.sh` bash script
+
+### Why bother?
 
 It's important to start from the position of understanding 'why'. In our case, we had a bunch of hardware sitting around and it felt like a waste to let it just sit there, but additionally, a number of our clients have pretty much the same situation - hardware they already own (or lease, or otherwise are already paying for) that may not make for the best production K8s system in the world, but it's a great way to learn and even run development environment(s) from.
 
-## Resources
+### Resources
 
 There are a couple of great walkthroughs focused on bare metal K8s that use a myriad of techniques:
 
@@ -27,7 +40,7 @@ We broke the process into a few main chunks:
 * K8s installation
 * K8s Basic Configuration  
 
-## Before we start...
+### Before we start...
 
 There were some core technology choices we made in getting this 'thing' put together.
 
@@ -79,7 +92,7 @@ Here's what our basic setup looks like:
 
 ![MaaS Setup](docs/maas-node-deployment.png)
 
-### Implementation
+## Hardware Provisioning
 
 Assuming that you've got MaaS up and running, we'll need to get a few things configured:
 
@@ -122,42 +135,51 @@ Process complete at 2018-10-09 20:55:04.924346
 MaaS cycle time - 380.480726 seconds
 ```
 
-*Some cycle times from testing while writing this document*:
+**Some cycle times from testing while writing this document**:
 
-* 380.480726 seconds
-* 392.017647 seconds
-* 384.070449 seconds
-* 374.849419 seconds
-* 369.701561 seconds
-* 378.361498 seconds
-* 372.739539 seconds
-* 384.646668 seconds
-* 363.866389 seconds
+## Ansible Playbook Sequencing
 
-* 362.87235 seconds
-* 370.448308 seconds
-* 364.965888 seconds
-* 379.316731 seconds
-* 356.932593 seconds
+### Base OS to 'Ready for k8s'
 
-
-## Base OS to 'Ready for k8s'
+Everything to prep the machines to get them ready for Kubernetes is contained within the `k8s-01-base.yaml` playbook.
 
 Once we have an OS, setting things up to run Kubernetes is ... pretty straightforward. Since we're using Ansible as our configuration management tool, the process of getting things moving are easy enough to follow:
 
 * Add a few specific repositories for packages and tools we'll need to install
     * Docker
     * Kubernetes
+* Actually install programs and tools including:
+    * `kubeadm`
+    * `kubelet`
+    * `docker-ce`
+* Remove and [disable swap](https://serverfault.com/questions/881517/why-disable-swap-on-kubernetes) per kubelet requirements
+* install [`helm`](https://github.com/helm/helm) binaries on master
 
 
-## K8s Installation
+### K8s Installation
 
+The `k8s-02-install.yaml` playbook handles actually initializing the kubernetes cluster master and nodes. We use [`kubeadm`](https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/) to get that done.  Of specific import, our configuration is a bit opinionated:
 
-real    11m16.237s
-real    10m5.336s
-real    8m50.719s
-real    9m9.790s
-real    8m42.987s
+* Single master cluster
+* The first IP assigned to the master (in MaaS via the MaaS API in our dynamic inventory) is used to configure the master API address
+* We don't add a ton of special configs... but all configs are in the `vars/k8s_config.yaml`
+* We do apply a few very basic manifests:
+    * Weave network overlay
+    * Service account for Helm Tiller to use
+    * Then we run `helm init` to make sure we're ready to deploy more stuff!
+* While it's a little 'hack-ey' we also write out a variable file at `vars/k8s_master.yaml` that contains the master IP so we can use it in downstream playbooks
 
+### K8s Basic Configuration
 
-## K8s Basic Configuration
+The `k8s-03-install.yaml` playbook installs a bunch of stuff to the `kube-system` namespace:
+
+* [Storage Class](https://kubernetes.io/docs/concepts/storage/storage-classes/) setup for NFS servers (we have 2 for dev purposes...)
+    * We use the [stable/nfs-client-provisioner](https://github.com/helm/charts/tree/master/stable/nfs-client-provisioner) helm chart
+* [nginx-ingress](https://github.com/helm/charts/tree/master/stable/nginx-ingress) to handle inbound connections bound to the master node's IP address
+* Monitoring charts
+    * [Prometheus](https://github.com/helm/charts/tree/master/stable/prometheus/)
+    * [Grafana](https://github.com/helm/charts/tree/master/stable/grafana/)
+
+### Local Access Configuration
+
+The `k8s-04-localhost.yaml` playbook grabs a `kubeconfig` file from the master, copies it locally and then merges any existing config file before placing it in `~/.kube/config`.
