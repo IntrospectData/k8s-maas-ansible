@@ -52,7 +52,7 @@ There were some core technology choices we made in getting this 'thing' put toge
 * Python to glue it together...
     * Ansible is based on Python... and there are a few [API clients](https://github.com/maas/python-libmaas) pre-baked for Python MaaS as well..
     * It also offers some cool opportunities to generate configurations for our networking gear, etc.
-    * We use `[virtualenv](https://virtualenv.readthedocs.io/en/latest/)` and `[virtualenvwrapper](https://virtualenvwrapper.readthedocs.io/en/latest/)` to manage our python environment(s) locally:
+    * We use [`virtualenv`](https://virtualenv.readthedocs.io/en/latest/) and [`virtualenvwrapper`](https://virtualenvwrapper.readthedocs.io/en/latest/) to manage our python environment(s) locally:
         * `mkvirtualenv -p python3 maas`
 
 ## Hardware-level management layer - Ubuntu Metal as a Service
