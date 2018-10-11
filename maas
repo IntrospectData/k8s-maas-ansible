@@ -1,0 +1,150 @@
+#!/usr/bin/env python
+import os
+from maas.client import connect
+import json
+import argparse
+from time import sleep
+from datetime import datetime
+import shutil
+
+
+class MaaSInventory(object):
+
+  def _wait_for_state(self, hostnames, desired_state):
+     wait_period = 1
+     ready = False
+     wait_loop_count = 0
+     while not ready:
+         ready_count = len([x for x in self.conn.machines.list() if x.hostname in hostnames and x.status_name.lower() == desired_state.lower()])
+         if len(hostnames) == ready_count:
+             print('Hosts have reached %s state: %s' % (desired_state, str(hostnames)))
+             ready = True
+         else:
+             if wait_loop_count % 20 == 0:
+                 print('%s of %s hosts ready to deploy' % (str(ready_count), str(len(hostnames))))
+             sleep(wait_period)
+         wait_loop_count += 1
+
+
+  def _get_hosts(self):
+      self._connect()
+      ret_val = {'master': [], 'other': []}
+      for m in self.conn.machines.list():
+          if self.master_host_tag in m.tags:
+              ret_val['master'].append(m.hostname)
+          elif self.other_hosts_tag in m.tags:
+              ret_val['other'].append(m.hostname)
+      return ret_val
+
+  def __init__(self):
+    self.conn = None
+    self.inventory = dict()
+    self.cache = dict()
+    self.read_settings()
+    self.parse_cli_args()
+    if self.args.kill or self.args.reset:
+        t1 = datetime.utcnow()
+        print('Starting reset process at %s' % str(t1))
+        #shutil.rmtree('~/.helm')
+        all_hosts = self._get_hosts()
+        hostnames = all_hosts['master'] + all_hosts['other']
+        for h in [x for x in self.conn.machines.list() if x.hostname in hostnames and x.status_name != 'Ready']:
+            print('Releasing host - %s' % h.hostname)
+            h.release()
+        self._wait_for_state(hostnames, "Ready")
+
+        if self.args.reset:
+            for h in [x for x in self.conn.machines.list() if x.hostname in hostnames and x.status_name != 'Deploy']:
+                print('Deploying Host - %s' % h.hostname)
+                h.deploy()
+
+            self._wait_for_state(hostnames, "Deployed")
+
+        t2 = datetime.utcnow()
+        print('Process complete at %s' % str(t2))
+        print('MaaS cycle time - %s seconds' % str((t2-t1).total_seconds()))
+    else:
+        self.update_inventory()
+
+        data_to_print = ""
+
+        if self.args.host:
+          data_to_print += self.get_host_info()
+        else:
+          for group in self.groups:
+            self.inventory[group] = self.groups[group]
+          self.inventory['_meta'] = {'hostvars': {}}
+          for hostname in self.hosts:
+            self.inventory['_meta']['hostvars'][hostname] = {'maas': self.hosts[hostname]}
+          data_to_print += self.json_format_dict(self.inventory, True)
+        print(data_to_print)
+
+
+  def update_inventory(self):
+    """Make calls to MaaS to get inventory"""
+    self._connect()
+    self.groups = {'master': {'hosts':[], 'vars': {}}, 'other': {'hosts':[], 'vars': {}}}
+    self.hosts = {}
+    data = [x for x in self.conn.machines.list() if x.status_name == 'Deployed']
+
+    for m in data:
+      if m.power_state.value.lower() != 'off' and m.status.name.lower() == 'deployed':
+        maas_data = {'ip_address': m.ip_addresses[0],
+                                  'status': m.status.name,
+                                  'power': m.get_power_parameters(),
+                                  'fqdn': m.fqdn,
+                                  'cpus': m.cpus,
+                                  'memory': m.memory,
+                                  'os': m.osystem,
+                                  'tags': m.tags}
+
+        if self.master_host_tag in maas_data.get('tags'):
+          self.groups['master']['hosts'].append(maas_data.get('ip_address'))
+          not_primary_ip = [a for a in m.ip_addresses if a != maas_data.get('ip_address')]
+          if not_primary_ip and len(not_primary_ip) > 0:
+            self.groups['master']['vars']['ingress_ip'] = not_primary_ip[0]
+          else:
+            self.groups['master']['vars']['ingress_ip'] = maas_data.get('ip_address')
+        elif self.other_hosts_tag in maas_data.get('tags'):
+          self.groups['other']['hosts'].append(maas_data.get('ip_address'))
+
+        self.hosts[m.hostname] = maas_data
+
+
+  def read_settings(self):
+    self.maas_host = os.getenv('MAAS_API_URL', 'http://172.16.16.2:5240/MAAS/')
+    self.maas_api_key = os.getenv('MAAS_API_KEY')
+    self.master_host_tag = os.getenv('K8S_MASTER_TAG', 'k8s-master')
+    self.other_hosts_tag = os.getenv('K8S_HOST_TAG', 'k8s-node')
+
+
+  def parse_cli_args(self):
+    parser = argparse.ArgumentParser(description='Produce an Ansible Inventory file based on MaaS')
+    parser.add_argument('--list', action='store_true', default=True, help='List instances (default: True)')
+    parser.add_argument('--host', action='store', help='Get all the variables about a specific instance')
+    parser.add_argument('--refresh-cache', action='store_true', default=True, help='Force refresh of cache by making API requests to MaaS (default: True)')
+    # The next two arguments are 'extras' to help make it easy to test cycling JUST the hardware layer
+    parser.add_argument('--reset', action='store_true', default=False, help='Power cycle the instances in-scope for the target cluster')
+    parser.add_argument('--kill', action='store_true', default=False, help='Turn off instances in-scope for the target cluster')
+    self.args = parser.parse_args()
+
+
+  def _connect(self):
+    if not self.conn:
+      self.conn = connect(self.maas_host, apikey=self.maas_api_key)
+
+
+  def to_safe(self, word):
+    """ Converts 'bad' characters in a string to underscores so they can be used as Ansible groups """
+    return re.sub(r"[^A-Za-z0-9\-]", "_", word)
+
+
+  def json_format_dict(self, data, pretty=False):
+    """ Converts a dict to a JSON object and dumps it as a formatted string """
+    if pretty:
+      return json.dumps(data, sort_keys=True, indent=2)
+    else:
+      return json.dumps(data)
+
+
+MaaSInventory()

@@ -1,0 +1,268 @@
+---
+- hosts: all
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+  - name: Include all .yaml and .json files
+    include_vars:
+      dir: vars
+      extensions:
+        - yaml
+        - json
+  - name: Install required packages for Docker CE
+    apt:
+      name:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+      state: present
+    register: apt_reqs
+    until: apt_reqs is success
+    retries: 3
+    delay: 3
+  - name: Add apt keys for docker and google
+    apt_key:
+      url: "{{ item }}"
+      state: present
+    with_items:
+      - https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      - https://download.docker.com/linux/ubuntu/gpg
+    register: apt_key
+    until: apt_key is success
+    retries: 3
+    delay: 3
+  - name: Add APT repository for K8s and Docker
+    apt_repository:
+      repo: "{{ item }}"
+      state: present
+    register: apt_repo
+    until: apt_repo is success
+    retries: 3
+    delay: 3
+    with_items:
+      - "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+      - "deb http://apt.kubernetes.io/ kubernetes-{{ ansible_distribution_release }} main"
+  - name: Run the equivalent of "apt-get update" as a separate step
+    apt:
+      update_cache: yes
+    register: apt_res
+    until: apt_res is success
+    retries: 3
+    delay: 3
+  - name: install apt packages
+    apt:
+      name:
+        - bridge-utils
+        - docker-ce
+        - kubeadm
+        - kubectl
+        - nfs-common
+        - kubelet
+      state: present
+  - name: create kubeconfig dir for user
+    file:
+      path: /home/ubuntu/.kube
+      state: directory
+      mode: 0755
+      owner: ubuntu
+      group: ubuntu
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0
+  - name: Remove swap from fstab so reboots work properly
+    lineinfile:
+      state: absent
+      path: /etc/fstab
+      firstmatch: yes
+      regexp: '^.*swap.*$'
+  - name: Create config directories
+    file:
+      path: "{{ item }}"
+      owner: root
+      group: root
+      state: directory
+      mode: 0755
+    with_items:
+      - /etc/kubernetes
+      - /etc/docker
+  - name: Copy static configuration files into place
+    copy:
+      src: "k8s/_base/files/{{ item.key }}"
+      dest: "{{ item.value }}"
+      owner: root
+      group: root
+      mode: 0644
+    with_dict:
+      "daemon.json": "/etc/docker/daemon.json"
+      "20-dns.conf": "/etc/systemd/system/kubelet.service.d/20-dns.conf"
+  - name: set bridge config in sysctl
+    sysctl:
+      name: net.bridge.bridge-nf-call-iptables
+      value: 1
+      state: present
+      reload: yes
+      sysctl_set: yes
+  - name: create kubernetes resolv.conf file
+    lineinfile:
+      path: /etc/kubernetes/resolv.conf
+      create: yes
+      line: 'nameserver {{ k8s_config.dns_server_ip }}'
+  - name: reload sysctl
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: kubelet
+- hosts: master
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: set authorized keys for ubuntu user
+      lineinfile:
+        path: /home/ubuntu/.ssh/authorized_keys
+        line: "{{ item }}"
+      with_items: "{{ k8s_config.ssh_keys }}"
+    - name: create kubeadm config file
+      template:
+        src: k8s/_base/files/kubeadm.conf.j2
+        dest: /tmp/kubeadm.yaml
+        owner: root
+        group: root
+        mode: 0644
+    - name: run Kubeadm init
+      command: kubeadm init --config /tmp/kubeadm.yaml
+      args:
+        creates: /etc/kubernetes/admin.conf
+    - name: create .kube directory for ubuntu
+      file:
+        state: directory
+        path: "{{ item }}"
+      with_items:
+        - /home/ubuntu/.kube
+    - name: copy kubeconfig into ubuntu user-specific location
+      command: cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+      args:
+        creates: /home/ubuntu/.kube/config
+    - name: set mode on kube config locally
+      file:
+        mode: 0644
+        path: "{{ item }}"
+        owner: ubuntu
+      with_items:
+        - /home/ubuntu/.kube/config
+    - name: install helm on master
+      unarchive:
+        extra_opts: ['--strip-components=1', '--show-stored-names']
+        remote_src: yes
+        src: "{{ helm_install_url }}"
+        dest: /usr/local/bin/
+        creates: /usr/local/bin/helm
+
+- hosts: master
+  remote_user: ubuntu
+  tasks:
+    - name: save master api endpoint to vars directory
+      local_action:
+        module: lineinfile
+        line: "k8s_master_ip: {{ ansible_all_ipv4_addresses[0] }}"
+        path: vars/k8s_master.yaml
+        create: yes
+        regexp: "k8s_master_ip.*$"
+
+- hosts: other
+  remote_user: ubuntu
+  become: yes
+  become_user: root
+  become_method: sudo
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: run Kubeadm join
+      command: kubeadm join --discovery-token-unsafe-skip-ca-verification --token {{ k8s_config.token }} {{ k8s_master_ip }}:{{ k8s_config.api_port }}
+      args:
+        creates: /etc/kubernetes/bootstrap-kubelet.conf
+      register: kubeadm_result
+    - debug:
+        var: kubeadm_result
+        verbosity: 2
+- hosts: master
+  remote_user: ubuntu
+  tasks:
+    - name: Make directories for deployment artifacts
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+      with_items:
+        - "{{ ansible_env.HOME }}/deploy"
+        - "{{ ansible_env.HOME }}/deploy/k8s-base"
+    - name: Copy core manifests
+      copy:
+        src: "k8s/_base/manifests/{{ item }}"
+        dest: "{{ ansible_env.HOME }}/deploy/k8s-base/{{ item }}"
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+        mode: 0644
+      with_items:
+        - "helm-tiller-auth.yaml"
+    - name: Install kubernetes manifests
+      shell: "kubectl apply -f {{ item }} --namespace kube-system"
+      with_items:
+        - "\"https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')\""
+        - "{{ ansible_env.HOME }}/deploy/k8s-base/helm-tiller-auth.yaml"
+    - name: Helm init / upgrade
+      shell: |
+        helm init --wait --service-account tiller --upgrade || exit 0
+
+- name: Local Setup and storage installation
+  hosts: 127.0.0.1
+  connection: local
+  vars:
+    kubeconfig_tmp_location: /tmp/kubeconfig.tmp
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: create kubeconfig dir for user
+      file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: 0755
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+    - name: Proactively remove temp file for kubeconfig
+      file:
+        path: "{{ kubeconfig_tmp_location }}"
+        state: absent
+    - name: Copy Kubeconfig to Local from Master
+      command: "scp ubuntu@{{ k8s_master_ip }}:~/.kube/config {{ kubeconfig_tmp_location }}"
+      args:
+        creates: /tmp/kubeconfig.tmp
+    - name: Merge Kube configs for local use - note env
+      shell: |
+        export KUBECONFIG=~/.kube/config:{{ kubeconfig_tmp_location }}
+        kubectl config view --flatten > ~/.kube/config
+        rm -rf {{ kubeconfig_tmp_location }}
+    - name: Proactively remove temp file for kubeconfig
+      file:
+        path: "{{ kubeconfig_tmp_location }}"
+        state: absent

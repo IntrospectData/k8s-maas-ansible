@@ -1,0 +1,28 @@
+- hosts: master
+  remote_user: ubuntu
+  tasks:
+    - name: Include all .yaml and .json files
+      include_vars:
+        dir: vars
+        extensions:
+          - yaml
+          - json
+    - name: Install Storage Classes
+      shell: "helm upgrade -i {{ item.key }}-client stable/nfs-client-provisioner --namespace {{ storage.namespace }} --set nfs.server={{ item.value.ip }},nfs.path={{ item.value.path }},storageClass.name={{ item.key }},storageClass.defaultClass={{ item.value.is_default_class }}"
+      with_dict: "{{ storage.nfs_client }}"
+    - name: create kubeadm config file
+      template:
+        src: "k8s/_base/manifests/{{ item }}.j2"
+        dest: "{{ ansible_env.HOME }}/deploy/k8s-base/{{ item }}"
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+        mode: 0644
+      with_items:
+        - kubernetes-dashboard-values.yaml
+        - nginx-ingress-values.yaml
+    - name: Install Helm charts
+      shell: "helm upgrade -i {{ item }} --namespace kube-system"
+      with_items:
+        - "nginx-ingress stable/nginx-ingress -f {{ ansible_env.HOME }}/deploy/k8s-base/nginx-ingress-values.yaml"
+        - "k8s-dashboard stable/kubernetes-dashboard -f {{ ansible_env.HOME }}/deploy/k8s-base/kubernetes-dashboard-values.yaml"
+        - "prometheus stable/prometheus"

@@ -1,0 +1,22 @@
+---
+apiVersion: kubeadm.k8s.io/v1alpha2
+kind: MasterConfiguration
+kubernetesVersion: {{ k8s_config.k8s_version }}
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: {{ k8s_config.token }}
+  ttl: 600s
+  usages:
+  - signing
+  - authentication
+kubeletConfiguration:
+  baseConfig:
+    resolvConf: /etc/kubernetes/resolv.conf
+networking:
+  dnsDomain: cluster.local
+  podSubnet: {{ k8s_config.pod_subnet }}
+  serviceSubnet: {{ k8s_config.service_subnet }}
+etcd:
+  extraArgs:
+    listen-peer-urls: http://127.0.0.1:2380
