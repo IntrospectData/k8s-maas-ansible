@@ -27,13 +27,13 @@
     apt_key:
       url: "{{ item }}"
       state: present
-    with_items:
-      - https://packages.cloud.google.com/apt/doc/apt-key.gpg
-      - https://download.docker.com/linux/ubuntu/gpg
     register: apt_key
     until: apt_key is success
     retries: 3
     delay: 3
+    with_items:
+      - https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      - https://download.docker.com/linux/ubuntu/gpg
   - name: Add APT repository for K8s and Docker
     apt_repository:
       repo: "{{ item }}"

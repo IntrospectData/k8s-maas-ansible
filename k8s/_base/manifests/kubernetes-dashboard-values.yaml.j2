@@ -14,7 +14,6 @@ replicaCount: 1
 ##
 labels:
   kubernetes.io/cluster-service: "true"
-  kubernetes.io/name: "Kubernetes Dashboard"
 
 ## Additional container arguments
 ##
@@ -39,7 +38,6 @@ service:
   externalPort: 443
 
   ## This allows an override of the heapster service name
-  ## Default: {{ .Chart.Name }}
   ##
   # nameOverride:
 
