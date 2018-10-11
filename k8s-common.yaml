@@ -7,22 +7,34 @@
         extensions:
           - yaml
           - json
+    - name: Make directories for deployment artifacts
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+        owner: "{{ ansible_effective_user_id }}"
+        group: "{{ ansible_effective_group_id }}"
+      with_items:
+        - "{{ ansible_env.HOME }}/deploy"
+        - "{{ ansible_env.HOME }}/deploy/kube-system"
     - name: Install Storage Classes
       shell: "helm upgrade -i {{ item.key }}-client stable/nfs-client-provisioner --namespace {{ storage.namespace }} --set nfs.server={{ item.value.ip }},nfs.path={{ item.value.path }},storageClass.name={{ item.key }},storageClass.defaultClass={{ item.value.is_default_class }}"
       with_dict: "{{ storage.nfs_client }}"
-    - name: create helm values files via templates 
+    - name: create helm values files via templates
       template:
-        src: "k8s/_base/manifests/{{ item }}.j2"
-        dest: "{{ ansible_env.HOME }}/deploy/k8s-base/{{ item }}"
+        src: "k8s/kube-system/{{ item }}.j2"
+        dest: "{{ ansible_env.HOME }}/deploy/kube-system/{{ item }}"
         owner: "{{ ansible_effective_user_id }}"
         group: "{{ ansible_effective_group_id }}"
         mode: 0644
       with_items:
         - kubernetes-dashboard-values.yaml
         - nginx-ingress-values.yaml
+        - grafana-values.yaml
     - name: Install Helm charts
       shell: "helm upgrade -i {{ item }} --namespace kube-system"
       with_items:
-        - "nginx-ingress stable/nginx-ingress -f {{ ansible_env.HOME }}/deploy/k8s-base/nginx-ingress-values.yaml"
-        - "k8s-dashboard stable/kubernetes-dashboard -f {{ ansible_env.HOME }}/deploy/k8s-base/kubernetes-dashboard-values.yaml"
+        - "nginx-ingress stable/nginx-ingress -f {{ ansible_env.HOME }}/deploy/kube-system/nginx-ingress-values.yaml"
+        - "k8s-dashboard stable/kubernetes-dashboard -f {{ ansible_env.HOME }}/deploy/kube-system/kubernetes-dashboard-values.yaml"
         - "prometheus stable/prometheus"
+        - "grafana stable/grafana -f {{ ansible_env.HOME }}/deploy/kube-system/grafana-values.yaml"

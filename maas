@@ -21,7 +21,7 @@ class MaaSInventory(object):
              ready = True
          else:
              if wait_loop_count % 20 == 0:
-                 print('%s of %s hosts ready to deploy' % (str(ready_count), str(len(hostnames))))
+                 print('%s of %s hosts are %s' % (str(ready_count), str(len(hostnames)), desired_state.lower()))
              sleep(wait_period)
          wait_loop_count += 1
 

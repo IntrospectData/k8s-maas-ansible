@@ -1,7 +1,7 @@
 k8s_config:
   dns_server_ip: 172.16.16.2
   k8s_version: v1.12.1
-  token: 070268.dea83e8d2d71cba4
+  initial_token: 070268.dea83e8d2d71cba4
   pod_subnet: 10.244.0.0/16
   service_subnet: 10.96.0.0/12
   api_port: "6443"
@@ -13,6 +13,11 @@ helm_install_url: https://storage.googleapis.com/kubernetes-helm/helm-v2.11.0-li
 dashboard:
   host: k8s.introspectdev.io
   cluster_admin_role: "true"
+grafana:
+  ingress:
+    enabled: "true"
+    host: grafana.introspectdev.io
+    class: nginx
 storage:
   namespace: kube-system
   nfs_client:

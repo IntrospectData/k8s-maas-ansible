@@ -34,7 +34,7 @@ def timed_cmd(cmd):
     log.info('Command {} took {} seconds to return status {}'.format(cmd, str(ret_val['elapsed']), str(ret_val['return_code'])))
     return ret_val
 
-COMMAND_LIST = ['rm -rf *.retry',
+COMMAND_LIST = ['bash _clean.sh',
                 'python maas --kill',
                 'python maas --reset',
                 'ansible-playbook k8s-base.yaml',
@@ -57,9 +57,16 @@ def cli(stage, maas_url, maas_key, debug, output_log):
     detail = {'start': datetime.utcnow().isoformat(), }
     results = {}
     log_id = '{}-{}'.format(str(stage), datetime.utcnow().isoformat().replace(':', '_').replace('.', '_'))
+    dt = datetime.utcnow()
+    results['_summary'] = {'start': dt.isoformat()}
     log.info('Starting to run proces for stage {} with commands: '.format(str(stage), COMMAND_LIST[:stage + 1]))
+    last_status_code = 0
     for cmd in COMMAND_LIST[:stage + 1]:
-        results[cmd] = timed_cmd('{}'.format(cmd))
+         if last_status_code = 0:
+            results[cmd] = timed_cmd('{}'.format(cmd))
+            last_status_code = results[cmd].get('return_code', 0)
+    elapsed = (datetime.utcnow() - dt).total_seconds()
+    results['_summary']['elapsed'] = elapsed
     if output_log:
         if not os.path.isdir('log'):
             os.makedirs('log')

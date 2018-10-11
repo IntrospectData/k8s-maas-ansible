@@ -192,7 +192,7 @@
           - yaml
           - json
     - name: run Kubeadm join
-      command: kubeadm join --discovery-token-unsafe-skip-ca-verification --token {{ k8s_config.token }} {{ k8s_master_ip }}:{{ k8s_config.api_port }}
+      command: kubeadm join --discovery-token-unsafe-skip-ca-verification --token {{ k8s_config.initial_token }} {{ k8s_master_ip }}:{{ k8s_config.api_port }}
       args:
         creates: /etc/kubernetes/bootstrap-kubelet.conf
       register: kubeadm_result

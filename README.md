@@ -2,6 +2,8 @@
 
 We see this project both as a proof of concept, but also as a lab and a great way to learn the basics of operating a [Kubernetes](https://kubernetes.io) (k8s) cluster.
 
+![Command Process](docs/k8s-maas-ansible.gif)
+
 ## Why bother?
 
 It's important to start from the position of understanding 'why'. In our case, we had a bunch of hardware sitting around and it felt like a waste to let it just sit there, but additionally, a number of our clients have pretty much the same situation - hardware they already own (or lease, or otherwise are already paying for) that may not make for the best production K8s system in the world, but it's a great way to learn and even run development environment(s) from.
@@ -72,6 +74,10 @@ We're assuming that the MaaS basic setup documentation is 'enough' to get you mo
 * Since MaaS acts as the [DHCP](https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol) server, you'll want to configure your network so that this can happen.
     * We just set up a separate VLAN and set it up without a DHCP server ...
 * If you can 'deploy' a machine and you get a functioning Ubuntu server, you're ready to actually get started.
+
+Here's what our basic setup looks like:
+
+![MaaS Setup](docs/maas-node-deployment.png)
 
 ### Implementation
 
