@@ -13,7 +13,7 @@ We see this project both as a proof of concept, but also as a lab and a great wa
     * `MAAS_API_URL`
     * `MAAS_API_KEY`
 * To run iteratively and measure results:
-    * use the `./iterate.py` python script
+    * use the `./measure.py` python script
 * To run process from end to end without timing/etc:
     * use the `./_run.sh` bash script
 
